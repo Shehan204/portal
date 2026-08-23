@@ -14,6 +14,7 @@ import {
   verifyTeacherPassword,
 } from '../utils/network';
 import { renderQRToCanvas } from '../utils/qrGenerator';
+import { createClientOpticalFrame } from '../utils/cryptoClient';
 import {
   Lock,
   Play,
@@ -205,25 +206,53 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     const generateAndDrawNextFrame = async () => {
       if (!isRunning) return;
 
+      let rawPayload = '';
+      let generatedTotal = framesGeneratedCount;
+      let generatedSeq = currentSeq;
+
       try {
         // Fetch new frame payload from backend
         const res = await fetch('/api/session/generate-frame', { method: 'POST' });
         if (res.ok) {
           const data = await res.json();
-          setCurrentFramePayload(data.raw);
-          setFramesGeneratedCount(data.framesGenerated);
-          setCurrentSeq(data.seq);
+          rawPayload = data.raw;
+          generatedTotal = data.framesGenerated;
+          generatedSeq = data.seq;
+        }
+      } catch {
+        // Fallback for static hosts
+      }
 
-          if (canvasRef.current) {
-            await renderQRToCanvas(canvasRef.current, data.raw, {
+      if (!rawPayload && session) {
+        localSeqRef.current += 1;
+        const { raw, chainHash } = createClientOpticalFrame(
+          session.id,
+          session.nonce || 'local_nonce',
+          session.secret || 'local_secret',
+          localSeqRef.current,
+          session.config,
+          localLastHashRef.current
+        );
+        localLastHashRef.current = chainHash;
+        rawPayload = raw;
+        generatedSeq = localSeqRef.current;
+        generatedTotal = localSeqRef.current;
+      }
+
+      if (rawPayload) {
+        setCurrentFramePayload(rawPayload);
+        setFramesGeneratedCount(generatedTotal);
+        setCurrentSeq(generatedSeq);
+
+        if (canvasRef.current) {
+          try {
+            await renderQRToCanvas(canvasRef.current, rawPayload, {
               errorCorrectionLevel: 'L',
               margin: 1,
               width: isFullscreen ? 600 : 360,
             });
-          }
+          } catch {}
         }
-      } catch (err) {
-        console.error('Frame generation error:', err);
       }
 
       // Calculate next frame interval with optional jitter
