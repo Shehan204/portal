@@ -55,6 +55,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isStarting, setIsStarting] = useState<boolean>(false);
+  const [isTerminating, setIsTerminating] = useState<boolean>(false);
 
   // Config State
   const [mode, setMode] = useState<ExperimentMode>('MODE_C_AUTHENTICATED');
@@ -62,7 +63,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [durationMinutes, setDurationMinutes] = useState<number>(5);
   const [randomTiming, setRandomTiming] = useState<boolean>(false);
   const [frameChaining, setFrameChaining] = useState<boolean>(true);
-  const [requiredFrames, setRequiredFrames] = useState<number>(4);
+  const [requiredFrames, setRequiredFrames] = useState<number>(10);
   const [timingJitterPercent, setTimingJitterPercent] = useState<number>(20);
 
   // Optical Display State
@@ -110,6 +111,35 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     };
   }, []);
 
+  // Periodic Polling to guarantee Live Attendance Feed stays synced
+  useEffect(() => {
+    if (!session || session.status !== 'ACTIVE') return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const active = await getActiveSession();
+        if (active) {
+          setSession((prev) => {
+            if (!prev) return active;
+            const currentAttendanceCount = prev.attendance?.length || 0;
+            const newAttendanceCount = active.attendance?.length || 0;
+            if (newAttendanceCount !== currentAttendanceCount) {
+              return {
+                ...prev,
+                attendance: active.attendance,
+                currentSeq: Math.max(prev.currentSeq, active.currentSeq || 0),
+                framesGenerated: Math.max(prev.framesGenerated, active.framesGenerated || 0),
+              };
+            }
+            return prev;
+          });
+        }
+      } catch {}
+    }, 1500);
+
+    return () => clearInterval(pollInterval);
+  }, [session?.id, session?.status]);
+
   const loadSession = async () => {
     setIsLoading(true);
     const active = await getActiveSession();
@@ -120,10 +150,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       setDurationMinutes(active.config.durationMinutes);
       setRandomTiming(active.config.randomTiming);
       setFrameChaining(active.config.frameChaining);
-      setRequiredFrames(active.config.requiredFrames);
+      setRequiredFrames(active.config.requiredFrames || 10);
       setTimingJitterPercent(active.config.timingJitterPercent || 20);
       localSeqRef.current = active.currentSeq || 0;
       setFramesGeneratedCount(active.framesGenerated || 0);
+    } else {
+      setSession(null);
     }
     setIsLoading(false);
   };
@@ -161,19 +193,27 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       localLastHashRef.current = '00000000';
       setFramesGeneratedCount(0);
     } else {
-      alert(`Failed to start session: ${res.error}`);
+      setAuthError(`Failed to start session: ${res.error || 'Unknown error'}`);
     }
     setIsStarting(false);
   };
 
-  // End Session
+  // End Session (Direct & Non-blocking)
   const handleEndSession = async () => {
-    if (!confirm('Are you sure you want to end this attendance session?')) return;
-    await endSession(TEACHER_PASSWORD);
-    if (frameTimerRef.current) {
-      clearTimeout(frameTimerRef.current);
+    setIsTerminating(true);
+    try {
+      if (frameTimerRef.current) {
+        clearTimeout(frameTimerRef.current);
+        frameTimerRef.current = null;
+      }
+      setSession((prev) => (prev ? { ...prev, status: 'ENDED' } : null));
+      await endSession(TEACHER_PASSWORD);
+      await loadSession();
+    } catch (err) {
+      console.error('Error terminating session:', err);
+    } finally {
+      setIsTerminating(false);
     }
-    await loadSession();
   };
 
   // Session Time Remaining Countdown
@@ -492,7 +532,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
 
             {/* Optical Signal Telemetry Footer */}
-            <div className="w-full grid grid-cols-3 gap-3 pt-4 border-t border-white/10 text-center font-mono">
+            <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-4 border-t border-white/10 text-center font-mono">
               <div className="bg-[#0F0F11] p-3 border border-white/10">
                 <div className="text-white/40 text-[9px] uppercase tracking-[0.2em] font-black">
                   Sequence Index
@@ -509,6 +549,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
               <div className="bg-[#0F0F11] p-3 border border-white/10">
                 <div className="text-white/40 text-[9px] uppercase tracking-[0.2em] font-black">
+                  QR Lifetime
+                </div>
+                <div className="text-xl font-black text-amber-300 mt-1">
+                  {Math.round(1000 / (session?.config?.qrRate || qrRate))} ms
+                </div>
+              </div>
+              <div className="bg-[#0F0F11] p-3 border border-white/10">
+                <div className="text-white/40 text-[9px] uppercase tracking-[0.2em] font-black">
                   Students Logged
                 </div>
                 <div className="text-xl font-black text-white mt-1">
@@ -518,12 +566,33 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </div>
           </div>
 
-          {/* Raw Payload Diagnostic Stream */}
-          <div className="w-full mt-4 bg-[#151518] text-white/80 p-4 border border-white/10 text-xs font-mono overflow-x-auto">
-            <span className="text-white/40 font-bold uppercase tracking-[0.25em] text-[9px] block mb-1">
-              Live Serialized Optical Payload
-            </span>
-            <code className="text-emerald-400 break-all select-all font-mono text-[11px]">
+          {/* Raw Payload Diagnostic Stream & Frame Lifetime Info */}
+          <div className="w-full mt-4 bg-[#151518] text-white/80 p-4 border border-white/10 text-xs font-mono">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-2 border-b border-white/10">
+              <span className="text-white/40 font-bold uppercase tracking-[0.25em] text-[9px]">
+                Optical Stream Protocol Metrics
+              </span>
+              <div className="flex items-center gap-3 text-[10px] text-white/70">
+                <span>
+                  QR Frame Lifetime:{' '}
+                  <strong className="text-emerald-400">
+                    {Math.round(1000 / (session?.config?.qrRate || qrRate))}ms
+                  </strong>
+                  {(session?.config?.mode === 'MODE_D_AUTH_RANDOM_TIMING' || session?.config?.randomTiming) && ' (±20% Jitter)'}
+                </span>
+                <span>&bull;</span>
+                <span>
+                  Required Quorum ({session?.config?.requiredFrames || requiredFrames} frames):{' '}
+                  <strong className="text-amber-300">
+                    {(
+                      ((session?.config?.requiredFrames || requiredFrames) * (1000 / (session?.config?.qrRate || qrRate))) /
+                      1000
+                    ).toFixed(2)}s
+                  </strong>
+                </span>
+              </div>
+            </div>
+            <code className="text-emerald-400 break-all select-all font-mono text-[11px] block">
               {currentFramePayload || 'Waiting for session start...'}
             </code>
           </div>
@@ -585,7 +654,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <div>
                 <div className="flex justify-between text-[10px] font-bold text-white/50 uppercase tracking-[0.25em] mb-2">
                   <span>Emission Frequency</span>
-                  <span className="text-white font-mono font-bold">{qrRate} QR / SEC</span>
+                  <span className="text-white font-mono font-bold">
+                    {qrRate} QR / SEC &bull; {Math.round(1000 / qrRate)}ms lifetime
+                  </span>
                 </div>
                 <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
                   {[2, 4, 6, 8, 10, 12, 15, 20].map((rate) => (
@@ -638,9 +709,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   >
                     <option value={1}>1 Frame (Minimal)</option>
                     <option value={3}>3 Frames</option>
-                    <option value={4}>4 Frames (Optimal)</option>
                     <option value={5}>5 Frames</option>
                     <option value={8}>8 Frames</option>
+                    <option value={10}>10 Frames (Standard Quorum)</option>
+                    <option value={12}>12 Frames</option>
+                    <option value={15}>15 Frames</option>
+                    <option value={20}>20 Frames (High Security)</option>
                   </select>
                 </div>
               </div>
@@ -676,17 +750,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   <button
                     id="end-session-btn"
                     onClick={handleEndSession}
-                    className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-black uppercase tracking-[0.2em] text-xs transition-colors flex items-center justify-center gap-2"
+                    disabled={isTerminating}
+                    className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-900 text-white font-black uppercase tracking-[0.2em] text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Square className="w-4 h-4 fill-current" />
-                    <span>TERMINATE SESSION</span>
+                    <span>{isTerminating ? 'TERMINATING SESSION...' : 'TERMINATE SESSION'}</span>
                   </button>
                 ) : (
                   <button
                     id="start-session-btn"
                     onClick={handleStartSession}
                     disabled={isStarting}
-                    className="w-full py-3.5 bg-white hover:bg-zinc-200 text-black font-black uppercase tracking-[0.2em] text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full py-3.5 bg-white hover:bg-zinc-200 text-black font-black uppercase tracking-[0.2em] text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                   >
                     <Play className="w-4 h-4 fill-current" />
                     <span>{isStarting ? 'INITIALIZING...' : 'START ATTENDANCE BROADCAST'}</span>

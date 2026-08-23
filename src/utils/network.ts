@@ -298,6 +298,9 @@ export async function submitAttendance(
     });
     const data = await res.json();
     if (res.ok && data.success) {
+      if (data.record) {
+        realtimeClient.broadcastLocal('attendance.updated', { record: data.record });
+      }
       return {
         success: data.success,
         record: data.record,
@@ -333,7 +336,7 @@ export async function submitAttendance(
         durationMinutes: 60,
         randomTiming: false,
         frameChaining: true,
-        requiredFrames: 3,
+        requiredFrames: 10,
         timingJitterPercent: 20,
       },
       status: 'ACTIVE',
@@ -355,7 +358,7 @@ export async function submitAttendance(
     };
   }
 
-  const requiredCount = activeSession.config.requiredFrames || 3;
+  const requiredCount = activeSession.config.requiredFrames || 10;
   if (activeSession.config.mode !== 'MODE_A_STATIC' && (!frames || frames.length < requiredCount)) {
     return {
       success: false,

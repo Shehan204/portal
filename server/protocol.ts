@@ -220,7 +220,7 @@ export function verifySubmissionSequence(
   }
 
   // 3. Minimum frame count requirement
-  const requiredCount = session.config.requiredFrames || 3;
+  const requiredCount = session.config.requiredFrames || 10;
   if (!frames || frames.length < requiredCount) {
     return {
       valid: false,

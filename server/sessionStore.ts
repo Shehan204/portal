@@ -25,7 +25,7 @@ class SessionStore {
       durationMinutes: 10,
       randomTiming: false,
       frameChaining: true,
-      requiredFrames: 4,
+      requiredFrames: 10,
       timingJitterPercent: 20,
     });
   }

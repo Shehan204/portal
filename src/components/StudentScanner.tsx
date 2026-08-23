@@ -37,7 +37,7 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
   const [capturedFrames, setCapturedFrames] = useState<
     { seq: number; ts: number; sig?: string; prevHash?: string; rawPayload: string }[]
   >([]);
-  const [requiredFramesTarget, setRequiredFramesTarget] = useState<number>(3);
+  const [requiredFramesTarget, setRequiredFramesTarget] = useState<number>(10);
   const [lastDetectedSeq, setLastDetectedSeq] = useState<number | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
 
@@ -49,7 +49,7 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
   // Critical Refs to avoid React State Closure Bugs in RequestAnimationFrame loop
   const cameraActiveRef = useRef<boolean>(false);
   const isVerifyingRef = useRef<boolean>(false);
-  const requiredFramesRef = useRef<number>(3);
+  const requiredFramesRef = useRef<number>(10);
   const scanStartTimeRef = useRef<number>(0);
   const totalDetectionsRef = useRef<number>(0);
   const totalMissesRef = useRef<number>(0);
@@ -242,7 +242,7 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
                 setCapturedFrames(updatedBuffer);
 
                 // If quorum target met, trigger immediate submission
-                const target = requiredFramesRef.current || 3;
+                const target = requiredFramesRef.current || 10;
                 if (updatedBuffer.length >= target && !isVerifyingRef.current) {
                   submitCurrentBuffer(payload.sid, updatedBuffer);
                   return;
@@ -327,33 +327,22 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
   // Direct simulation helper for testing without a physical second display
   const handleSimulateScan = async () => {
     const session = await getActiveSession();
-    if (!session || session.status !== 'ACTIVE') {
-      alert('No active session currently running. Please start a session in the Teacher Dashboard tab first.');
-      return;
-    }
+    const sid = session?.id || 'SES-SAMPLE';
+    const targetCount = requiredFramesRef.current || 10;
+    const currentSeq = session?.currentSeq || 1;
 
-    const currentSeq = session.currentSeq || 1;
-    const sampleFrames = [
-      {
-        seq: currentSeq + 1,
-        ts: Date.now(),
-        rawPayload: `V1~${session.id}~${currentSeq + 1}~${Date.now()}~100~C~prev01~sig01`,
-      },
-      {
-        seq: currentSeq + 2,
-        ts: Date.now() + 100,
-        rawPayload: `V1~${session.id}~${currentSeq + 2}~${Date.now() + 100}~100~C~prev02~sig02`,
-      },
-      {
-        seq: currentSeq + 3,
-        ts: Date.now() + 200,
-        rawPayload: `V1~${session.id}~${currentSeq + 3}~${Date.now() + 200}~100~C~prev03~sig03`,
-      },
-    ];
+    const sampleFrames = [];
+    for (let i = 1; i <= targetCount; i++) {
+      sampleFrames.push({
+        seq: currentSeq + i,
+        ts: Date.now() + (i - 1) * 125,
+        rawPayload: `V1~${sid}~${currentSeq + i}~${Date.now() + (i - 1) * 125}~125~C~prev0${i}~sig0${i}`,
+      });
+    }
 
     capturedBufferRef.current = sampleFrames;
     setCapturedFrames(sampleFrames);
-    submitCurrentBuffer(session.id, sampleFrames);
+    submitCurrentBuffer(sid, sampleFrames);
   };
 
   // Reset and restart scanner
