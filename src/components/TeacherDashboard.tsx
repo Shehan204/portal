@@ -255,53 +255,31 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     const generateAndDrawNextFrame = async () => {
       if (!isRunning) return;
 
-      let rawPayload = '';
-      let generatedTotal = framesGeneratedCount;
-      let generatedSeq = currentSeq;
+      localSeqRef.current += 1;
+      const currentSeqNum = localSeqRef.current;
 
-      try {
-        // Fetch new frame payload from backend
-        const res = await fetch('/api/session/generate-frame', { method: 'POST' });
-        if (res.ok) {
-          const data = await res.json();
-          rawPayload = data.raw;
-          generatedTotal = data.framesGenerated;
-          generatedSeq = data.seq;
-        }
-      } catch {
-        // Fallback for static hosts
-      }
+      const { raw, chainHash } = createClientOpticalFrame(
+        session.id,
+        session.nonce || 'local_nonce',
+        session.secret || 'local_secret',
+        currentSeqNum,
+        session.config,
+        localLastHashRef.current
+      );
+      localLastHashRef.current = chainHash;
 
-      if (!rawPayload && session) {
-        localSeqRef.current += 1;
-        const { raw, chainHash } = createClientOpticalFrame(
-          session.id,
-          session.nonce || 'local_nonce',
-          session.secret || 'local_secret',
-          localSeqRef.current,
-          session.config,
-          localLastHashRef.current
-        );
-        localLastHashRef.current = chainHash;
-        rawPayload = raw;
-        generatedSeq = localSeqRef.current;
-        generatedTotal = localSeqRef.current;
-      }
+      setCurrentFramePayload(raw);
+      setFramesGeneratedCount(currentSeqNum);
+      setCurrentSeq(currentSeqNum);
 
-      if (rawPayload) {
-        setCurrentFramePayload(rawPayload);
-        setFramesGeneratedCount(generatedTotal);
-        setCurrentSeq(generatedSeq);
-
-        if (canvasRef.current) {
-          try {
-            await renderQRToCanvas(canvasRef.current, rawPayload, {
-              errorCorrectionLevel: 'L',
-              margin: 1,
-              width: isFullscreen ? 600 : 360,
-            });
-          } catch {}
-        }
+      if (canvasRef.current && raw) {
+        try {
+          await renderQRToCanvas(canvasRef.current, raw, {
+            errorCorrectionLevel: 'L',
+            margin: 1,
+            width: isFullscreen ? 600 : 360,
+          });
+        } catch {}
       }
 
       // Calculate next frame interval with optional jitter

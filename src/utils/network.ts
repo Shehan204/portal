@@ -168,20 +168,42 @@ function setStoredLocalSession(session: ActiveSession | null) {
   } catch {}
 }
 
+let isBackendAvailable: boolean | null = null;
+let lastServerProbeTime = 0;
+const PROBE_INTERVAL_MS = 60000; // Probe at most once a minute if backend was unavailable
+
+function shouldAttemptServerCall(): boolean {
+  if (isBackendAvailable === true) return true;
+  if (isBackendAvailable === false) {
+    const now = Date.now();
+    if (now - lastServerProbeTime < PROBE_INTERVAL_MS) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // API Helpers with graceful offline/static fallbacks
 
 export async function getActiveSession(): Promise<ActiveSession | null> {
-  try {
-    const res = await fetch('/api/session/active');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.session) {
-        setStoredLocalSession(data.session);
-        return data.session;
+  if (shouldAttemptServerCall()) {
+    try {
+      lastServerProbeTime = Date.now();
+      const res = await fetch('/api/session/active');
+      if (res.ok) {
+        isBackendAvailable = true;
+        const data = await res.json();
+        if (data.session) {
+          setStoredLocalSession(data.session);
+          return data.session;
+        }
+      } else if (res.status === 404 || res.status === 502) {
+        // Backend not deployed at this URL (e.g. Vercel static hosting)
+        isBackendAvailable = false;
       }
+    } catch {
+      isBackendAvailable = false;
     }
-  } catch {
-    // API not reachable, fallback to client session
   }
   return getStoredLocalSession();
 }
@@ -191,50 +213,66 @@ export async function verifyTeacherPassword(password: string): Promise<boolean> 
 
   // If matches research password, succeed immediately (support offline / static hosting)
   if (trimmed === TEACHER_PASSWORD || trimmed === 'research2026') {
-    try {
-      fetch('/api/teacher/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: trimmed }),
-      }).catch(() => {});
-    } catch {}
+    if (shouldAttemptServerCall()) {
+      try {
+        fetch('/api/teacher/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: trimmed }),
+        }).catch(() => {});
+      } catch {}
+    }
     return true;
   }
 
-  try {
-    const res = await fetch('/api/teacher/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: trimmed }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.success === true;
-  } catch {
-    return false;
+  if (shouldAttemptServerCall()) {
+    try {
+      lastServerProbeTime = Date.now();
+      const res = await fetch('/api/teacher/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: trimmed }),
+      });
+      if (res.ok) {
+        isBackendAvailable = true;
+        const data = await res.json();
+        return data.success === true;
+      } else if (res.status === 404) {
+        isBackendAvailable = false;
+      }
+    } catch {
+      isBackendAvailable = false;
+    }
   }
+  return false;
 }
 
 export async function startSession(
   password: string,
   config: SessionConfig
 ): Promise<{ success: boolean; session?: ActiveSession; error?: string }> {
-  try {
-    const res = await fetch('/api/session/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, config }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.session) {
-        setStoredLocalSession(data.session);
-        realtimeClient.broadcastLocal('session.created', data.session);
-        return { success: true, session: data.session };
+  if (shouldAttemptServerCall()) {
+    try {
+      lastServerProbeTime = Date.now();
+      const res = await fetch('/api/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, config }),
+      });
+      if (res.ok) {
+        isBackendAvailable = true;
+        const data = await res.json();
+        if (data.session) {
+          setStoredLocalSession(data.session);
+          realtimeClient.broadcastLocal('session.created', data.session);
+          return { success: true, session: data.session };
+        }
+      } else if (res.status === 404) {
+        isBackendAvailable = false;
       }
+    } catch {
+      isBackendAvailable = false;
     }
-  } catch {
-    // Fallback to local session creation
   }
 
   // Local fallback
@@ -266,20 +304,26 @@ export async function startSession(
 export async function endSession(
   password: string
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await fetch('/api/session/end', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setStoredLocalSession(null);
-      realtimeClient.broadcastLocal('session.ended', {});
-      return { success: true };
+  if (shouldAttemptServerCall()) {
+    try {
+      lastServerProbeTime = Date.now();
+      const res = await fetch('/api/session/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        isBackendAvailable = true;
+        const data = await res.json();
+        setStoredLocalSession(null);
+        realtimeClient.broadcastLocal('session.ended', {});
+        return { success: true };
+      } else if (res.status === 404) {
+        isBackendAvailable = false;
+      }
+    } catch {
+      isBackendAvailable = false;
     }
-  } catch {
-    // Fallback
   }
 
   setStoredLocalSession(null);
@@ -290,33 +334,41 @@ export async function endSession(
 export async function submitAttendance(
   submission: StudentSubmission
 ): Promise<{ success: boolean; record?: AttendanceRecord; code?: string; message: string }> {
-  try {
-    const res = await fetch('/api/attendance/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(submission),
-    });
-    const data = await res.json();
-    if (res.ok && data.success) {
-      if (data.record) {
-        realtimeClient.broadcastLocal('attendance.updated', { record: data.record });
+  if (shouldAttemptServerCall()) {
+    try {
+      lastServerProbeTime = Date.now();
+      const res = await fetch('/api/attendance/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submission),
+      });
+      if (res.status === 404) {
+        isBackendAvailable = false;
+      } else {
+        isBackendAvailable = true;
+        const data = await res.json();
+        if (res.ok && data.success) {
+          if (data.record) {
+            realtimeClient.broadcastLocal('attendance.updated', { record: data.record });
+          }
+          return {
+            success: data.success,
+            record: data.record,
+            code: data.code,
+            message: data.message,
+          };
+        } else if (data && data.code && data.code !== 'NO_ACTIVE_SESSION') {
+          // If server explicitly returned validation error (e.g. duplicate or HMAC invalid), return it
+          return {
+            success: false,
+            code: data.code,
+            message: data.message || 'Verification rejected by server.',
+          };
+        }
       }
-      return {
-        success: data.success,
-        record: data.record,
-        code: data.code,
-        message: data.message,
-      };
-    } else if (data && data.code && data.code !== 'NO_ACTIVE_SESSION') {
-      // If server explicitly returned validation error (e.g. duplicate or HMAC invalid), return it
-      return {
-        success: false,
-        code: data.code,
-        message: data.message || 'Verification rejected by server.',
-      };
+    } catch {
+      isBackendAvailable = false;
     }
-  } catch {
-    // Fallback to client-side verification
   }
 
   // Client-Side Verification Engine Fallback

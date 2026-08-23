@@ -331,32 +331,7 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
     const targetCount = requiredFramesRef.current || 10;
     const currentSeq = session?.currentSeq || 0;
 
-    // 1. Try server batch generation endpoint for real HMAC cryptographic signatures
-    try {
-      const res = await fetch('/api/session/generate-frame-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: targetCount }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.frames && data.frames.length >= targetCount) {
-          const validFrames = data.frames.slice(0, targetCount).map((f: any) => ({
-            seq: f.seq,
-            ts: f.payload?.ts || Date.now(),
-            sig: f.payload?.sig,
-            prevHash: f.payload?.prevHash,
-            rawPayload: f.raw,
-          }));
-          capturedBufferRef.current = validFrames;
-          setCapturedFrames(validFrames);
-          submitCurrentBuffer(session?.id || sid, validFrames);
-          return;
-        }
-      }
-    } catch {}
-
-    // 2. Client-side cryptographic frame generation fallback
+    // Cryptographic frame generation using active session parameters
     const config: SessionConfig = session?.config || {
       mode: 'MODE_C_AUTHENTICATED',
       qrRate: 8,
