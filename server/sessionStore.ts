@@ -82,6 +82,9 @@ class SessionStore {
 
   public addAttendance(record: AttendanceRecord): boolean {
     if (!this.activeSession) return false;
+    if (!this.activeSession.attendance) {
+      this.activeSession.attendance = [];
+    }
     // Check if student is already marked present
     const existing = this.activeSession.attendance.find(
       (a) => a.studentName.trim().toLowerCase() === record.studentName.trim().toLowerCase() && a.status === 'PRESENT'
@@ -89,7 +92,7 @@ class SessionStore {
     if (existing) {
       return false;
     }
-    this.activeSession.attendance.push(record);
+    this.activeSession.attendance.unshift(record);
     return true;
   }
 

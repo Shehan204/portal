@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AttendanceRecord } from '../types/protocol';
-import { parseClientFramePayload, generateClientChallenge } from '../utils/cryptoClient';
+import { AttendanceRecord, SessionConfig } from '../types/protocol';
+import { parseClientFramePayload, generateClientChallenge, createClientOpticalFrame } from '../utils/cryptoClient';
 import { QRScannerEngine } from '../utils/qrDecoder';
 import { getActiveSession, submitAttendance } from '../utils/network';
 import {
@@ -327,16 +327,65 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
   // Direct simulation helper for testing without a physical second display
   const handleSimulateScan = async () => {
     const session = await getActiveSession();
-    const sid = session?.id || 'SES-SAMPLE';
+    const sid = session?.id || 'SES-ACTIVE';
     const targetCount = requiredFramesRef.current || 10;
-    const currentSeq = session?.currentSeq || 1;
+    const currentSeq = session?.currentSeq || 0;
+
+    // 1. Try server batch generation endpoint for real HMAC cryptographic signatures
+    try {
+      const res = await fetch('/api/session/generate-frame-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: targetCount }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.frames && data.frames.length >= targetCount) {
+          const validFrames = data.frames.slice(0, targetCount).map((f: any) => ({
+            seq: f.seq,
+            ts: f.payload?.ts || Date.now(),
+            sig: f.payload?.sig,
+            prevHash: f.payload?.prevHash,
+            rawPayload: f.raw,
+          }));
+          capturedBufferRef.current = validFrames;
+          setCapturedFrames(validFrames);
+          submitCurrentBuffer(session?.id || sid, validFrames);
+          return;
+        }
+      }
+    } catch {}
+
+    // 2. Client-side cryptographic frame generation fallback
+    const config: SessionConfig = session?.config || {
+      mode: 'MODE_C_AUTHENTICATED',
+      qrRate: 8,
+      durationMinutes: 60,
+      randomTiming: false,
+      frameChaining: true,
+      requiredFrames: 10,
+      timingJitterPercent: 20,
+    };
 
     const sampleFrames = [];
+    let lastHash = session?.lastFrameHash || '00000000';
     for (let i = 1; i <= targetCount; i++) {
+      const frameSeq = currentSeq + i;
+      const { payload, raw, chainHash } = createClientOpticalFrame(
+        sid,
+        session?.nonce || 'local_nonce_' + sid,
+        session?.secret || 'local_secret_' + sid,
+        frameSeq,
+        config,
+        lastHash
+      );
+      lastHash = chainHash;
       sampleFrames.push({
-        seq: currentSeq + i,
-        ts: Date.now() + (i - 1) * 125,
-        rawPayload: `V1~${sid}~${currentSeq + i}~${Date.now() + (i - 1) * 125}~125~C~prev0${i}~sig0${i}`,
+        seq: frameSeq,
+        ts: payload.ts,
+        sig: payload.sig,
+        prevHash: payload.prevHash,
+        rawPayload: raw,
       });
     }
 

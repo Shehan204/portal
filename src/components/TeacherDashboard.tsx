@@ -84,14 +84,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     loadSession();
 
     // Listen to real-time events
-    const unsubUpdate = realtimeClient.on('attendance.updated', (data: { record: AttendanceRecord }) => {
+    const unsubUpdate = realtimeClient.on('attendance.updated', (data: any) => {
+      const record = data?.record;
+      if (!record) return;
       setSession((prev) => {
         if (!prev) return prev;
-        const exists = prev.attendance.some((a) => a.studentName === data.record.studentName);
+        const currentList = prev.attendance || [];
+        const exists = currentList.some(
+          (a) => a.id === record.id || a.studentName.toLowerCase() === record.studentName.toLowerCase()
+        );
         if (exists) return prev;
         return {
           ...prev,
-          attendance: [data.record, ...prev.attendance],
+          attendance: [record, ...currentList],
         };
       });
     });
@@ -111,34 +116,38 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     };
   }, []);
 
-  // Periodic Polling to guarantee Live Attendance Feed stays synced
+  // Continuous Polling to guarantee Live Attendance Feed stays synced across all devices and tabs
   useEffect(() => {
-    if (!session || session.status !== 'ACTIVE') return;
-
     const pollInterval = setInterval(async () => {
       try {
         const active = await getActiveSession();
         if (active) {
           setSession((prev) => {
             if (!prev) return active;
-            const currentAttendanceCount = prev.attendance?.length || 0;
-            const newAttendanceCount = active.attendance?.length || 0;
-            if (newAttendanceCount !== currentAttendanceCount) {
+            const prevAttendance = prev.attendance || [];
+            const activeAttendance = active.attendance || [];
+
+            // If count or latest attendance differs, sync full attendance array
+            if (
+              activeAttendance.length !== prevAttendance.length ||
+              (activeAttendance[0]?.id && activeAttendance[0]?.id !== prevAttendance[0]?.id)
+            ) {
               return {
                 ...prev,
-                attendance: active.attendance,
-                currentSeq: Math.max(prev.currentSeq, active.currentSeq || 0),
-                framesGenerated: Math.max(prev.framesGenerated, active.framesGenerated || 0),
+                ...active,
+                attendance: activeAttendance,
+                currentSeq: Math.max(prev.currentSeq || 0, active.currentSeq || 0),
+                framesGenerated: Math.max(prev.framesGenerated || 0, active.framesGenerated || 0),
               };
             }
             return prev;
           });
         }
       } catch {}
-    }, 1500);
+    }, 1000);
 
     return () => clearInterval(pollInterval);
-  }, [session?.id, session?.status]);
+  }, []);
 
   const loadSession = async () => {
     setIsLoading(true);
