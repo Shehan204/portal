@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #0F0F11;
+    color: #E4E4E7;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .font-serif-italic {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+  }
+}
+
+.text-stroke-subtle {
+  -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.4);
+}
+
+.text-stroke-heavy {
+  -webkit-text-stroke: 2px rgba(255, 255, 255, 0.8);
+}
+
+.text-stroke-accent {
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.25);
+}
+
+/* Custom scrollbar for dense data logs */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F0F11;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3F3F46;
+}

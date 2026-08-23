@@ -1,0 +1,10 @@
+{
+  "name": "Temporal Dynamic QR Attendance Research PoC",
+  "description": "Research proof-of-concept for temporal dynamic optical QR code attendance verification and replay resistance testing.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
