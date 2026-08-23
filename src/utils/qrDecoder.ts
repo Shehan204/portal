@@ -34,14 +34,14 @@ export class QRScannerEngine {
           formats: ['qr_code'],
         });
         this.hasBarcodeDetector = true;
-      } catch (e) {
+      } catch {
         this.hasBarcodeDetector = false;
       }
     }
   }
 
   /**
-   * Reads video frame and attempts QR decoding
+   * Reads video frame and attempts high-speed QR decoding
    */
   public async scanVideoFrame(
     video: HTMLVideoElement
@@ -61,7 +61,7 @@ export class QRScannerEngine {
       this.lastFpsCalcTime = now;
     }
 
-    // Try high-speed Native BarcodeDetector first
+    // 1. Try high-speed Native BarcodeDetector if available
     if (this.hasBarcodeDetector && this.barcodeDetector) {
       try {
         const barcodes = await this.barcodeDetector.detect(video);
@@ -84,16 +84,22 @@ export class QRScannerEngine {
           };
         }
       } catch {
-        // Fallback to jsQR on error
+        // Continue to fallback
       }
     }
 
-    // Universal fallback: jsQR
+    // 2. High-performance CPU fallback: jsQR with adaptive downscaling
     if (!this.ctx) return null;
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-    if (width === 0 || height === 0) return null;
+    const rawWidth = video.videoWidth;
+    const rawHeight = video.videoHeight;
+    if (rawWidth === 0 || rawHeight === 0) return null;
+
+    // Scale to max 640px dimension for ultra-fast 60fps jsQR CPU decode
+    const maxDimension = 640;
+    const scale = Math.min(1, maxDimension / Math.max(rawWidth, rawHeight));
+    const width = Math.round(rawWidth * scale);
+    const height = Math.round(rawHeight * scale);
 
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
@@ -104,7 +110,7 @@ export class QRScannerEngine {
     const imageData = this.ctx.getImageData(0, 0, width, height);
 
     const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert',
+      inversionAttempts: 'attemptBoth',
     });
 
     const decodeLatencyMs = performance.now() - startTime;
@@ -132,6 +138,6 @@ export class QRScannerEngine {
   }
 
   public getEngineName(): string {
-    return this.hasBarcodeDetector ? 'Native BarcodeDetector' : 'jsQR CPU Engine';
+    return this.hasBarcodeDetector ? 'Native BarcodeDetector (GPU)' : 'jsQR Fast CPU Engine';
   }
 }
