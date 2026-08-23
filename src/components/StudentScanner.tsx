@@ -16,9 +16,10 @@ import {
 
 interface StudentScannerProps {
   onOpenCalibration: () => void;
+  onNavigateToTeacher?: () => void;
 }
 
-export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibration }) => {
+export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibration, onNavigateToTeacher }) => {
   // Flow step: 'NAME_ENTRY' | 'SCANNING' | 'SUCCESS' | 'ERROR'
   const [step, setStep] = useState<'NAME_ENTRY' | 'SCANNING' | 'SUCCESS' | 'ERROR'>('NAME_ENTRY');
   const [studentName, setStudentName] = useState<string>(() => {
@@ -643,12 +644,23 @@ export const StudentScanner: React.FC<StudentScannerProps> = ({ onOpenCalibratio
             {errorMessage}
           </div>
 
-          <button
-            onClick={handleReset}
-            className="w-full py-3.5 bg-white hover:bg-zinc-200 text-black font-black uppercase tracking-[0.2em] text-xs transition-colors cursor-pointer"
-          >
-            Re-Attempt Optical Scan
-          </button>
+          <div className="space-y-3">
+            <button
+              onClick={handleReset}
+              className="w-full py-3.5 bg-white hover:bg-zinc-200 text-black font-black uppercase tracking-[0.2em] text-xs transition-colors cursor-pointer"
+            >
+              Re-Attempt Optical Scan
+            </button>
+
+            {onNavigateToTeacher && (
+              <button
+                onClick={onNavigateToTeacher}
+                className="w-full py-3 bg-white/10 hover:bg-white/15 text-white font-mono text-xs uppercase tracking-wider border border-white/20 transition-colors cursor-pointer"
+              >
+                Go to Teacher Dashboard to Start Session
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

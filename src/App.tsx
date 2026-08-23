@@ -66,7 +66,10 @@ export default function App() {
         )}
 
         {activeTab === 'student' && (
-          <StudentScanner onOpenCalibration={() => setActiveTab('calibration')} />
+          <StudentScanner
+            onOpenCalibration={() => setActiveTab('calibration')}
+            onNavigateToTeacher={() => setActiveTab('teacher')}
+          />
         )}
 
         {activeTab === 'security-lab' && <SecurityTestLab />}
